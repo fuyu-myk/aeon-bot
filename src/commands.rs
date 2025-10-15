@@ -1,4 +1,4 @@
-use rusqlite::params;
+use sqlx::Row;
 use crate::events::VoiceStateTracker;
 
 // Type aliases for convenience
@@ -32,8 +32,8 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
 
     for entry in leaderboard_data {
         leaderboard_text.push_str(&format!(
-            "{}. <@{}> - {} points ({} minutes)\n",
-            rank, entry.user_id, entry.total_points, entry.total_minutes
+            "{}. {} - {} points ({} minutes)\n",
+            rank, entry.username, entry.total_points, entry.total_minutes
         ));
         rank += 1;
     }
@@ -58,36 +58,38 @@ pub async fn rank(ctx: Context<'_>) -> Result<(), Error> {
         }
     };
 
-    // Perform database operations in a separate scope
-    let (rank, points, minutes) = {
-        let db = ctx.data().db.lock().await;
-        
-        // Get user's stats
-        let user_stats: Option<(i32, i32)> = db.query_row(
-            "SELECT total_points, total_minutes FROM users WHERE user_id = ?1 AND guild_id = ?2",
-            params![user_id.get() as i64, guild_id.get() as i64],
-            |row| Ok((row.get(0)?, row.get(1)?))
-        ).ok();
+    // Perform database operations
+    let user_stats = sqlx::query(
+        "SELECT total_points, total_minutes FROM users WHERE user_id = ? AND guild_id = ?"
+    )
+    .bind(user_id.get() as i64)
+    .bind(guild_id.get() as i64)
+    .fetch_optional(&ctx.data().db)
+    .await?;
 
-        let (points, minutes) = match user_stats {
-            Some(stats) => stats,
-            None => {
-                drop(db); // Release lock before awaiting
-                ctx.say("You don't have any voice activity recorded yet! Join a voice channel to start earning points.").await?;
-                return Ok(());
-            }
-        };
+    let (points, minutes) = match user_stats {
+        Some(row) => {
+            let points: i32 = row.get("total_points");
+            let minutes: i32 = row.get("total_minutes");
+            (points, minutes)
+        }
+        None => {
+            ctx.say("You don't have any voice activity recorded yet! Join a voice channel to start earning points.").await?;
+            return Ok(());
+        }
+    };
 
-        // Get user's rank
-        let rank: i32 = db.query_row(
-            "SELECT COUNT(*) + 1 FROM users 
-             WHERE guild_id = ?1 AND total_points > ?2",
-            params![guild_id.get() as i64, points],
-            |row| row.get(0)
-        )?;
-
-        (rank, points, minutes)
-    }; // Lock is released here
+    // Get user's rank
+    let rank_row = sqlx::query(
+        "SELECT COUNT(*) + 1 as rank FROM users 
+         WHERE guild_id = ? AND total_points > ?"
+    )
+    .bind(guild_id.get() as i64)
+    .bind(points)
+    .fetch_one(&ctx.data().db)
+    .await?;
+    
+    let rank: i32 = rank_row.get("rank");
 
     let response = format!(
         "📊 **Your Stats**\n\n\
@@ -113,48 +115,51 @@ pub async fn stats(ctx: Context<'_>) -> Result<(), Error> {
         }
     };
 
-    // Perform database operations in a separate scope
-    let (points, minutes, session_count, avg_duration, currently_active) = {
-        let db = ctx.data().db.lock().await;
-        
-        // Get user's stats
-        let user_stats: Option<(i32, i32)> = db.query_row(
-            "SELECT total_points, total_minutes FROM users WHERE user_id = ?1 AND guild_id = ?2",
-            params![user_id.get() as i64, guild_id.get() as i64],
-            |row| Ok((row.get(0)?, row.get(1)?))
-        ).ok();
+    // Perform database operations
+    let user_stats = sqlx::query(
+        "SELECT total_points, total_minutes FROM users WHERE user_id = ? AND guild_id = ?"
+    )
+    .bind(user_id.get() as i64)
+    .bind(guild_id.get() as i64)
+    .fetch_optional(&ctx.data().db)
+    .await?;
 
-        let (points, minutes) = match user_stats {
-            Some(stats) => stats,
-            None => {
-                drop(db); // Release lock before awaiting
-                ctx.say("You don't have any voice activity recorded yet! Join a voice channel to start earning points.").await?;
-                return Ok(());
-            }
-        };
+    let (points, minutes) = match user_stats {
+        Some(row) => {
+            let points: i32 = row.get("total_points");
+            let minutes: i32 = row.get("total_minutes");
+            (points, minutes)
+        }
+        None => {
+            ctx.say("You don't have any voice activity recorded yet! Join a voice channel to start earning points.").await?;
+            return Ok(());
+        }
+    };
 
-        // Get session count
-        let session_count: i32 = db.query_row(
-            "SELECT COUNT(*) FROM session_history WHERE user_id = ?1 AND guild_id = ?2",
-            params![user_id.get() as i64, guild_id.get() as i64],
-            |row| row.get(0)
-        ).unwrap_or(0);
+    // Get session count
+    let session_count_row = sqlx::query(
+        "SELECT COUNT(*) as count FROM session_history WHERE user_id = ? AND guild_id = ?"
+    )
+    .bind(user_id.get() as i64)
+    .bind(guild_id.get() as i64)
+    .fetch_one(&ctx.data().db)
+    .await?;
+    let session_count: i32 = session_count_row.get("count");
 
-        // Get average session duration
-        let avg_duration: f64 = db.query_row(
-            "SELECT AVG(duration_minutes) FROM session_history WHERE user_id = ?1 AND guild_id = ?2",
-            params![user_id.get() as i64, guild_id.get() as i64],
-            |row| row.get(0)
-        ).unwrap_or(0.0);
+    // Get average session duration
+    let avg_duration_row = sqlx::query(
+        "SELECT AVG(duration_minutes) as avg FROM session_history WHERE user_id = ? AND guild_id = ?"
+    )
+    .bind(user_id.get() as i64)
+    .bind(guild_id.get() as i64)
+    .fetch_one(&ctx.data().db)
+    .await?;
+    let avg_duration: Option<f64> = avg_duration_row.get("avg");
+    let avg_duration = avg_duration.unwrap_or(0.0);
 
-        drop(db); // Release database lock before locking active_sessions
-
-        // Check if currently in voice
-        let active_sessions = ctx.data().active_sessions.lock().await;
-        let currently_active = active_sessions.contains_key(&(user_id, guild_id));
-
-        (points, minutes, session_count, avg_duration, currently_active)
-    }; // All locks are released here
+    // Check if currently in voice
+    let active_sessions = ctx.data().active_sessions.lock().await;
+    let currently_active = active_sessions.contains_key(&(user_id, guild_id));
 
     let response = format!(
         "📈 **Detailed Voice Stats**\n\n\

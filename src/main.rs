@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .expect("Failed to initialize database");
 
-    let db = Arc::clone(&tracker.db);
+    let db = tracker.db.clone();
     let active_sessions = Arc::clone(&tracker.active_sessions);
 
     // Build the poise framework
