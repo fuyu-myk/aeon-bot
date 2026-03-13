@@ -1,9 +1,11 @@
 mod events;
 mod commands;
+mod games;
 
 use poise::serenity_prelude as serenity;
-use events::VoiceStateTracker;
+use events::GlobalTracker;
 use commands::{ping, leaderboard, rank, stats};
+use games::ttt::commands::ttt;
 use std::sync::Arc;
 
 
@@ -22,12 +24,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         | serenity::GatewayIntents::MESSAGE_CONTENT;
 
     // Create the voice state tracker
-    let tracker = VoiceStateTracker::new()
+    let tracker = GlobalTracker::new()
         .await
         .expect("Failed to initialize database");
 
     let db = tracker.db.clone();
     let active_sessions = Arc::clone(&tracker.active_sessions);
+    let ttt_games = Arc::clone(&tracker.ttt_games);
+    let ttt_challenges = Arc::clone(&tracker.ttt_challenges);
 
     // Build the poise framework
     let framework = poise::Framework::builder()
@@ -37,16 +41,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 leaderboard(),
                 rank(),
                 stats(),
+                ttt(),
             ],
             ..Default::default()
         })
         .setup(|ctx, _ready, framework| {
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                
-                Ok(VoiceStateTracker {
+
+                Ok(GlobalTracker {
                     db,
                     active_sessions,
+                    ttt_games,
+                    ttt_challenges,
                 })
             })
         })

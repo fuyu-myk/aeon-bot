@@ -1,9 +1,9 @@
 use sqlx::Row;
-use crate::events::VoiceStateTracker;
+use crate::events::GlobalTracker;
 
 // Type aliases for convenience
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
-pub type Context<'a> = poise::Context<'a, VoiceStateTracker, Error>;
+pub type Context<'a> = poise::Context<'a, GlobalTracker, Error>;
 
 
 /// Check if the bot is responsive

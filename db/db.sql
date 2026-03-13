@@ -29,3 +29,34 @@ CREATE TABLE IF NOT EXISTS session_history (
     duration_minutes INTEGER,
     points_awarded INTEGER
 );
+
+-- Tic-Tac-Toe: Q-learning value table
+-- Stores the bot's learned policy across all board states.
+-- state_key is a 9-char string: '_', 'X', or 'O' per cell (row-major).
+-- action is the cell index 0–8 the bot played from that state.
+CREATE TABLE IF NOT EXISTS ttt_q_table (
+    state_key   TEXT    NOT NULL,
+    action      INTEGER NOT NULL,
+    q_value     REAL    DEFAULT 0.0,
+    visit_count INTEGER DEFAULT 0,
+    PRIMARY KEY (state_key, action)
+);
+
+-- Tic-Tac-Toe: bot aggregate win/loss/draw record (singleton, id = 1)
+CREATE TABLE IF NOT EXISTS ttt_bot_stats (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    total_games INTEGER DEFAULT 0,
+    wins        INTEGER DEFAULT 0,
+    losses      INTEGER DEFAULT 0,
+    draws       INTEGER DEFAULT 0
+);
+
+-- Tic-Tac-Toe: per-player stats within each guild
+CREATE TABLE IF NOT EXISTS ttt_player_stats (
+    user_id  INTEGER NOT NULL,
+    guild_id INTEGER NOT NULL,
+    wins     INTEGER DEFAULT 0,
+    losses   INTEGER DEFAULT 0,
+    draws    INTEGER DEFAULT 0,
+    PRIMARY KEY (user_id, guild_id)
+);

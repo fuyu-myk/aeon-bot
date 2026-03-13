@@ -3,6 +3,7 @@ use serenity::client::{Context, EventHandler};
 use serenity::model::gateway::Ready;
 use serenity::model::voice::VoiceState;
 use serenity::model::id::{GuildId, ChannelId, UserId};
+use serenity::model::application::Interaction;
 use poise::serenity_prelude as serenity;
 use tokio::time::{interval, Duration};
 use tokio::sync::Mutex;
@@ -11,10 +12,14 @@ use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use std::collections::HashMap;
 
+use crate::games::ttt::{TttGames, TttChallenges};
 
-pub struct VoiceStateTracker {
+
+pub struct GlobalTracker {
     pub db: SqlitePool,
     pub active_sessions: Arc<Mutex<HashMap<(UserId, GuildId), VoiceSession>>>,
+    pub ttt_games: TttGames,
+    pub ttt_challenges: TttChallenges,
 }
 
 #[allow(dead_code)]
@@ -35,10 +40,10 @@ pub struct LeaderboardEntry {
     pub total_minutes: i32,
 }
 
-impl VoiceStateTracker {
+impl GlobalTracker {
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let pool = SqlitePool::connect("sqlite:db/voice_logs.db").await?;
-        
+
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER NOT NULL,
@@ -74,9 +79,47 @@ impl VoiceStateTracker {
             )"
         ).execute(&pool).await?;
 
+        // ── Tic-Tac-Toe tables ─────────────────────────────────────────────
+
+        // Q-learning value table (persists the bot's learned policy)
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ttt_q_table (
+                state_key   TEXT    NOT NULL,
+                action      INTEGER NOT NULL,
+                q_value     REAL    DEFAULT 0.0,
+                visit_count INTEGER DEFAULT 0,
+                PRIMARY KEY (state_key, action)
+            )"
+        ).execute(&pool).await?;
+
+        // Singleton row tracking the bot's aggregate record
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ttt_bot_stats (
+                id          INTEGER PRIMARY KEY CHECK (id = 1),
+                total_games INTEGER DEFAULT 0,
+                wins        INTEGER DEFAULT 0,
+                losses      INTEGER DEFAULT 0,
+                draws       INTEGER DEFAULT 0
+            )"
+        ).execute(&pool).await?;
+
+        // Per-player tic-tac-toe statistics
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ttt_player_stats (
+                user_id  INTEGER NOT NULL,
+                guild_id INTEGER NOT NULL,
+                wins     INTEGER DEFAULT 0,
+                losses   INTEGER DEFAULT 0,
+                draws    INTEGER DEFAULT 0,
+                PRIMARY KEY (user_id, guild_id)
+            )"
+        ).execute(&pool).await?;
+
         Ok(Self {
             db: pool,
             active_sessions: Arc::new(Mutex::new(HashMap::new())),
+            ttt_games: Arc::new(Mutex::new(HashMap::new())),
+            ttt_challenges: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -230,10 +273,10 @@ impl VoiceStateTracker {
 
     pub async fn get_leaderboard(&self, guild_id: GuildId, limit: i32) -> Result<Vec<LeaderboardEntry>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT user_id, username, total_points, total_minutes 
-             FROM users 
+            "SELECT user_id, username, total_points, total_minutes
+             FROM users
              WHERE guild_id = ? AND total_points > 0
-             ORDER BY total_points DESC 
+             ORDER BY total_points DESC
              LIMIT ?"
         )
         .bind(guild_id.get() as i64)
@@ -255,7 +298,7 @@ impl VoiceStateTracker {
 }
 
 #[async_trait]
-impl EventHandler for VoiceStateTracker {
+impl EventHandler for GlobalTracker {
     async fn ready(&self, ctx: Context, ready: Ready) {
         println!("{} is connected!", ready.user.name);
 
@@ -277,6 +320,22 @@ impl EventHandler for VoiceStateTracker {
                 }
             }
         );
+    }
+
+    async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
+        match &interaction {
+            Interaction::Component(component) => {
+                if component.data.custom_id.starts_with("ttt_") {
+                    crate::games::ttt::interactions::handle_ttt_interaction(&ctx, component, self).await;
+                }
+            }
+            Interaction::Modal(modal) => {
+                if modal.data.custom_id.starts_with("ttt_") {
+                    crate::games::ttt::interactions::handle_ttt_modal(&ctx, modal, self).await;
+                }
+            }
+            _ => {}
+        }
     }
 
     async fn voice_state_update(&self, ctx: Context, old: Option<VoiceState>, new: VoiceState) {
