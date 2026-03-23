@@ -8,13 +8,13 @@ use serenity::{
 };
 use sqlx::Row;
 
-use crate::events::GlobalTracker;
+use crate::{events::GlobalTracker, games::lib::GAME_TIMEOUT_SECS};
 use crate::games::lib as games_lib;
 use super::{
-    generate_game_id, points_for_beating_bot, Bet, BetTarget, TttGame, GAME_TIMEOUT_SECS,
+    points_for_beating_bot, Bet, BetTarget, TttGame,
 };
 use super::board::{Board, Cell, GameResult};
-use super::commands::{game_status, make_bet_row, make_board_components};
+use super::{game_status, make_bet_row, make_board_components};
 use super::qlearning::QLearner;
 
 
@@ -315,7 +315,7 @@ async fn handle_accept(
     data.ttt_challenges.lock().await.remove(&game_id);
 
     let board = Board::new();
-    let new_game_id = generate_game_id();
+    let new_game_id = games_lib::generate_game_id();
     let bot_games = get_bot_total_games(&data.db).await;
 
     let content = game_status(
