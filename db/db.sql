@@ -60,3 +60,17 @@ CREATE TABLE IF NOT EXISTS ttt_player_stats (
     draws    INTEGER DEFAULT 0,
     PRIMARY KEY (user_id, guild_id)
 );
+
+-- Blackjack: per-player stats within each guild
+CREATE TABLE IF NOT EXISTS bj_player_stats (
+    user_id       INTEGER NOT NULL,
+    guild_id      INTEGER NOT NULL,
+    wins          INTEGER NOT NULL DEFAULT 0,
+    losses        INTEGER NOT NULL DEFAULT 0,
+    pushes        INTEGER NOT NULL DEFAULT 0,
+    surrenders    INTEGER NOT NULL DEFAULT 0,
+    blackjacks    INTEGER NOT NULL DEFAULT 0,
+    total_wagered INTEGER NOT NULL DEFAULT 0,
+    total_won     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, guild_id)
+);

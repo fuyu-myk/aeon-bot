@@ -1,20 +1,19 @@
 pub mod board;
-pub mod qlearning;
 pub mod commands;
 pub mod interactions;
+pub mod qlearning;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use poise::serenity_prelude::{ChannelId, GuildId, MessageId, UserId};
 use serenity::all::{ButtonStyle, CreateActionRow, CreateButton};
 use tokio::sync::Mutex;
-use poise::serenity_prelude::{UserId, GuildId, ChannelId, MessageId};
 
 use board::Board;
 
 use crate::games::ttt::board::Cell;
-
 
 /// Who an observer is betting on in a PvP game
 #[derive(Clone, Debug, PartialEq)]
@@ -105,39 +104,39 @@ pub type TttChallenges = Arc<Mutex<HashMap<String, PendingChallenge>>>;
 /// the bot's experience at the time the game started
 pub fn points_for_beating_bot(bot_games_at_start: i64) -> i64 {
     match bot_games_at_start {
-        0..=49    =>  5,
-        50..=199  => 10,
+        0..=49 => 5,
+        50..=199 => 10,
         200..=499 => 15,
-        _         => 25,
+        _ => 25,
     }
 }
 
 // ── Board rendering ───────────────────────────────────────────────────────────
 
 /// Builds the 3×3 button grid for the current board state
-pub fn make_board_components(
-    board: &Board,
-    game_id: &str,
-    disabled: bool,
-) -> Vec<CreateActionRow> {
-    (0..3_usize).map(|row| {
-        let buttons: Vec<CreateButton> = (0..3_usize).map(|col| {
-            let pos = row * 3 + col;
-            let cell = board.get(pos);
-            let (label, style, cell_disabled) = match cell {
-                Cell::Empty => ("⬜", ButtonStyle::Secondary, false),
-                Cell::X    => ("❌", ButtonStyle::Primary, true),
-                Cell::O    => ("⭕", ButtonStyle::Danger, true),
-            };
+pub fn make_board_components(board: &Board, game_id: &str, disabled: bool) -> Vec<CreateActionRow> {
+    (0..3_usize)
+        .map(|row| {
+            let buttons: Vec<CreateButton> = (0..3_usize)
+                .map(|col| {
+                    let pos = row * 3 + col;
+                    let cell = board.get(pos);
+                    let (label, style, cell_disabled) = match cell {
+                        Cell::Empty => ("⬜", ButtonStyle::Secondary, false),
+                        Cell::X => ("❌", ButtonStyle::Primary, true),
+                        Cell::O => ("⭕", ButtonStyle::Danger, true),
+                    };
 
-            CreateButton::new(format!("ttt_move_{}_{}", game_id, pos))
-                .label(label)
-                .style(style)
-                .disabled(disabled || cell_disabled)
-        }).collect();
+                    CreateButton::new(format!("ttt_move_{}_{}", game_id, pos))
+                        .label(label)
+                        .style(style)
+                        .disabled(disabled || cell_disabled)
+                })
+                .collect();
 
-        CreateActionRow::Buttons(buttons)
-    }).collect()
+            CreateActionRow::Buttons(buttons)
+        })
+        .collect()
 }
 
 /// Builds the observer-betting row appended below the board for PvP games
@@ -195,10 +194,10 @@ pub fn game_status(
         }
     } else {
         let exp_label = match bot_games {
-            0..=49    => format!("🐣 Novice ({} games)", bot_games),
-            50..=199  => format!("🔰 Apprentice ({} games)", bot_games),
+            0..=49 => format!("🐣 Novice ({} games)", bot_games),
+            50..=199 => format!("🔰 Apprentice ({} games)", bot_games),
             200..=499 => format!("⚔️ Veteran ({} games)", bot_games),
-            _         => format!("💀 Expert ({} games)", bot_games),
+            _ => format!("💀 Expert ({} games)", bot_games),
         };
 
         format!(
@@ -227,16 +226,14 @@ pub fn game_status(
 
 async fn get_bot_total_games(db: &sqlx::SqlitePool) -> i64 {
     use sqlx::Row;
-    
-    sqlx::query(
-        "SELECT COALESCE(total_games, 0) AS total_games FROM ttt_bot_stats WHERE id = 1",
-    )
-    .fetch_optional(db)
-    .await
-    .ok()
-    .flatten()
-    .map(|row| row.get::<i64, _>("total_games"))
-    .unwrap_or(0)
+
+    sqlx::query("SELECT COALESCE(total_games, 0) AS total_games FROM ttt_bot_stats WHERE id = 1")
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .map(|row| row.get::<i64, _>("total_games"))
+        .unwrap_or(0)
 }
 
 async fn ensure_user_row(db: &sqlx::SqlitePool, user_id: UserId, guild_id: GuildId) {

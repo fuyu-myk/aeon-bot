@@ -66,7 +66,9 @@ pub enum GameResult {
 #[allow(dead_code)]
 impl Board {
     pub fn new() -> Self {
-        Board { cells: [Cell::Empty; 9] }
+        Board {
+            cells: [Cell::Empty; 9],
+        }
     }
 
     pub fn from_state(state: &str) -> Self {

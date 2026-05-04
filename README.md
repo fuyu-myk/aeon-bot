@@ -29,6 +29,13 @@ More info can be found under [`COMMANDS.md`](docs/COMMANDS.md). A summary of the
 - `/ttt stats` — View the bot's all-time win/loss/draw record and current experience tier
 - `/ttt challenge @user [wager]` — Challenge another user; optionally wager points (winner takes both stakes)
 
+### Blackjack
+
+- `/bj` — Show Blackjack help
+- `/bj play` — Play a game of Blackjack against the bot (dealer)
+- `/bj host` — Host a multiplayer Blackjack game (other players can join)
+- `/bj stats` — View your Blackjack game stats (total games, wins, losses, etc.)
+
 ## Tic-Tac-Toe — How It Works
 
 ### Self-learning bot

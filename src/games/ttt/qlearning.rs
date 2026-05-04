@@ -1,5 +1,4 @@
-use sqlx::{SqlitePool, Row};
-
+use sqlx::{Row, SqlitePool};
 
 /// Q-learning agent for tic-tac-toe
 ///
@@ -15,7 +14,10 @@ pub struct QLearner {
 
 impl QLearner {
     pub fn new() -> Self {
-        QLearner { alpha: 0.3, gamma: 0.9 }
+        QLearner {
+            alpha: 0.3,
+            gamma: 0.9,
+        }
     }
 
     /// Epsilon decays from 0.9 (full exploration) to 0.05 (mostly exploitation)
@@ -30,17 +32,15 @@ impl QLearner {
     }
 
     pub async fn get_q(&self, db: &SqlitePool, state: &str, action: usize) -> f64 {
-        sqlx::query(
-            "SELECT q_value FROM ttt_q_table WHERE state_key = ? AND action = ?",
-        )
-        .bind(state)
-        .bind(action as i64)
-        .fetch_optional(db)
-        .await
-        .ok()
-        .flatten()
-        .map(|row| row.get::<f64, _>("q_value"))
-        .unwrap_or(0.0)
+        sqlx::query("SELECT q_value FROM ttt_q_table WHERE state_key = ? AND action = ?")
+            .bind(state)
+            .bind(action as i64)
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten()
+            .map(|row| row.get::<f64, _>("q_value"))
+            .unwrap_or(0.0)
     }
 
     pub async fn set_q(&self, db: &SqlitePool, state: &str, action: usize, value: f64) {
@@ -104,12 +104,7 @@ impl QLearner {
     /// Walks backward through `history` (pairs of state-before-move and action)
     /// propagating discounted reward, so intermediate positions learn to
     /// anticipate the final outcome
-    pub async fn td_update(
-        &self,
-        db: &SqlitePool,
-        history: &[(String, usize)],
-        final_reward: f64,
-    ) {
+    pub async fn td_update(&self, db: &SqlitePool, history: &[(String, usize)], final_reward: f64) {
         if history.is_empty() {
             return;
         }

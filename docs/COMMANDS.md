@@ -3,21 +3,27 @@
 ## Commands
 
 ### `/ping`
+
 Check if the bot is responsive.
+
 - **Usage**: `/ping`
 - **Response**: Pong!
 
 ### `/leaderboard`
+
 Display the top 10 users by voice activity.
+
 - **Usage**: `/leaderboard`
-- **Shows**: 
+- **Shows**:
   - User rank
   - Total points
   - Total minutes in voice
 - **Scope**: Server-specific
 
 ### `/rank`
+
 View your current rank and basic stats.
+
 - **Usage**: `/rank`
 - **Shows**:
   - Your rank in the server
@@ -26,7 +32,9 @@ View your current rank and basic stats.
 - **Scope**: Server-specific
 
 ### `/stats`
+
 View detailed voice activity statistics.
+
 - **Usage**: `/stats`
 - **Shows**:
   - Total points
@@ -35,6 +43,24 @@ View detailed voice activity statistics.
   - Average session duration
   - Current voice status
 - **Scope**: Server-specific
+
+### `/ttt`
+
+Play a game of Tic Tac Toe.
+
+- **Usage**: `/ttt [subcommand]`
+  - `play`: Start a new game against the bot
+  - `challenge`: Challenge another user to a game with an optional wager
+  - `stats`: View bot's win/loss/draw record
+
+### `/bj`
+
+Play a game of Blackjack.
+
+- **Usage**: `/bj [subcommand]`
+  - `play`: Start a new solo game with wagers
+  - `host`: Host a game for other users to join with wagers
+  - `stats`: View user's detailed win/loss record
 
 ## How Points Work
 
@@ -54,22 +80,26 @@ View detailed voice activity statistics.
 ## Troubleshooting
 
 **Commands not showing up?**
+
 - Make sure bot has `applications.commands` scope when invited
 - Wait a few seconds after bot starts (commands register on startup)
 - Try refreshing Discord (Ctrl+R / Cmd+R)
 
 **Not earning points?**
+
 - Make sure bot has permission to see voice states
 - Check that you're in a voice channel (not AFK channel)
 - Points update every minute, not instantly
 
 **Stats showing 0?**
+
 - You need to join and leave a voice channel first
 - Stay in voice for at least 1 minute to earn points
 
 ## Bot Permissions Required
 
 Minimum permissions:
+
 - View Channels
 - Send Messages  
 - Connect (to see voice states)

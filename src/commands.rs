@@ -1,10 +1,9 @@
-use sqlx::Row;
 use crate::events::GlobalTracker;
+use sqlx::Row;
 
 // Type aliases for convenience
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Context<'a> = poise::Context<'a, GlobalTracker, Error>;
-
 
 /// Check if the bot is responsive
 #[poise::command(slash_command, prefix_command)]
@@ -19,7 +18,8 @@ pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => {
-            ctx.say("This command can only be used in a server!").await?;
+            ctx.say("This command can only be used in a server!")
+                .await?;
             return Ok(());
         }
     };
@@ -53,14 +53,15 @@ pub async fn rank(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => {
-            ctx.say("This command can only be used in a server!").await?;
+            ctx.say("This command can only be used in a server!")
+                .await?;
             return Ok(());
         }
     };
 
     // Perform database operations
     let user_stats = sqlx::query(
-        "SELECT total_points, total_minutes FROM users WHERE user_id = ? AND guild_id = ?"
+        "SELECT total_points, total_minutes FROM users WHERE user_id = ? AND guild_id = ?",
     )
     .bind(user_id.get() as i64)
     .bind(guild_id.get() as i64)
@@ -82,13 +83,13 @@ pub async fn rank(ctx: Context<'_>) -> Result<(), Error> {
     // Get user's rank
     let rank_row = sqlx::query(
         "SELECT COUNT(*) + 1 as rank FROM users 
-         WHERE guild_id = ? AND total_points > ?"
+         WHERE guild_id = ? AND total_points > ?",
     )
     .bind(guild_id.get() as i64)
     .bind(points)
     .fetch_one(&ctx.data().db)
     .await?;
-    
+
     let rank: i32 = rank_row.get("rank");
 
     let response = format!(
@@ -96,7 +97,10 @@ pub async fn rank(ctx: Context<'_>) -> Result<(), Error> {
          Rank: #{}\n\
          Total Points: {}\n\
          Total Time: {} minutes ({:.1} hours)",
-        rank, points, minutes, minutes as f64 / 60.0
+        rank,
+        points,
+        minutes,
+        minutes as f64 / 60.0,
     );
 
     ctx.say(response).await?;
@@ -110,14 +114,15 @@ pub async fn stats(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => {
-            ctx.say("This command can only be used in a server!").await?;
+            ctx.say("This command can only be used in a server!")
+                .await?;
             return Ok(());
         }
     };
 
     // Perform database operations
     let user_stats = sqlx::query(
-        "SELECT total_points, total_minutes FROM users WHERE user_id = ? AND guild_id = ?"
+        "SELECT total_points, total_minutes FROM users WHERE user_id = ? AND guild_id = ?",
     )
     .bind(user_id.get() as i64)
     .bind(guild_id.get() as i64)
@@ -138,7 +143,7 @@ pub async fn stats(ctx: Context<'_>) -> Result<(), Error> {
 
     // Get session count
     let session_count_row = sqlx::query(
-        "SELECT COUNT(*) as count FROM session_history WHERE user_id = ? AND guild_id = ?"
+        "SELECT COUNT(*) as count FROM session_history WHERE user_id = ? AND guild_id = ?",
     )
     .bind(user_id.get() as i64)
     .bind(guild_id.get() as i64)
@@ -168,12 +173,16 @@ pub async fn stats(ctx: Context<'_>) -> Result<(), Error> {
          Session Count: {}\n\
          Average Session: {:.1} minutes\n\
          Currently Active: {}",
-        points, 
-        minutes, 
+        points,
+        minutes,
         minutes as f64 / 60.0,
         session_count,
         avg_duration,
-        if currently_active { "✅ Yes" } else { "❌ No" }
+        if currently_active {
+            "✅ Yes"
+        } else {
+            "❌ No"
+        },
     );
 
     ctx.say(response).await?;

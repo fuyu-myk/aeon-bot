@@ -8,15 +8,18 @@ use serenity::{
 };
 use sqlx::Row;
 
-use crate::{events::GlobalTracker, games::lib::GAME_TIMEOUT_SECS};
-use crate::games::lib as games_lib;
-use super::{
-    points_for_beating_bot, Bet, BetTarget, TttGame,
-};
 use super::board::{Board, Cell, GameResult};
-use super::{game_status, make_bet_row, make_board_components};
 use super::qlearning::QLearner;
-
+use super::{Bet, BetTarget, TttGame, points_for_beating_bot};
+use super::{game_status, make_bet_row, make_board_components};
+use crate::games::lib as games_lib;
+use crate::{
+    events::GlobalTracker,
+    games::lib::{
+        GAME_TIMEOUT_SECS, ephemeral_reply, extract_modal_value, modal_ephemeral_reply,
+        parse_bet_id, parse_bet_modal_id, parse_move_id,
+    },
+};
 
 // ── Public entry points ───────────────────────────────────────────────────────
 
@@ -48,77 +51,6 @@ pub async fn handle_ttt_modal(
     if modal.data.custom_id.starts_with("ttt_bet_modal_") {
         handle_bet_modal_submit(ctx, modal, data).await;
     }
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/// Sends an ephemeral message in response to a component interaction
-async fn ephemeral_reply(ctx: &serenity::Context, component: &ComponentInteraction, text: &str) {
-    let _ = component
-        .create_response(
-            &ctx.http,
-            CreateInteractionResponse::Message(
-                CreateInteractionResponseMessage::new()
-                    .content(text)
-                    .ephemeral(true),
-            ),
-        )
-        .await;
-}
-
-/// Sends an ephemeral message in response to a modal submission
-async fn modal_ephemeral_reply(ctx: &serenity::Context, modal: &ModalInteraction, text: &str) {
-    let _ = modal
-        .create_response(
-            &ctx.http,
-            CreateInteractionResponse::Message(
-                CreateInteractionResponseMessage::new()
-                    .content(text)
-                    .ephemeral(true),
-            ),
-        )
-        .await;
-}
-
-/// Parse `ttt_move_{game_id}_{pos}` → `(game_id, pos)`
-fn parse_move_id(custom_id: &str) -> Option<(String, usize)> {
-    let rest = custom_id.strip_prefix("ttt_move_")?;
-    let (game_id, pos_str) = rest.rsplit_once('_')?;
-    let pos = pos_str.parse().ok()?;
-    Some((game_id.to_string(), pos))
-}
-
-/// Parse `ttt_bet_{game_id}_{target}` → `(game_id, target)`
-fn parse_bet_id(custom_id: &str) -> Option<(String, BetTarget)> {
-    let rest = custom_id.strip_prefix("ttt_bet_")?;
-    let (game_id, target_str) = rest.rsplit_once('_')?;
-    let target = BetTarget::from_str(target_str)?;
-
-    Some((game_id.to_string(), target))
-}
-
-/// Parse `ttt_bet_modal_{game_id}_{target}` → `(game_id, target)`
-fn parse_bet_modal_id(custom_id: &str) -> Option<(String, BetTarget)> {
-    let rest = custom_id.strip_prefix("ttt_bet_modal_")?;
-    let (game_id, target_str) = rest.rsplit_once('_')?;
-    let target = BetTarget::from_str(target_str)?;
-
-    Some((game_id.to_string(), target))
-}
-
-/// Extract a named text-input value from a modal submission's components
-fn extract_modal_value<'a>(modal: &'a ModalInteraction, field_id: &str) -> Option<&'a str> {
-    modal
-        .data
-        .components
-        .iter()
-        .flat_map(|row| row.components.iter())
-        .find_map(|comp| match comp {
-            serenity::ActionRowComponent::InputText(input) if input.custom_id == field_id => {
-                input.value.as_deref()
-            }
-            _ => None,
-        })
 }
 
 // ── Move handler ──────────────────────────────────────────────────────────────
@@ -153,7 +85,7 @@ async fn handle_move(
 
     // ── Validate it's your turn ───────────────────────────────────────────
     let is_p1 = game_snapshot.player1_id == user_id;
-    let is_p2 = game_snapshot.player2_id.map_or(false, |id| id == user_id);
+    let is_p2 = game_snapshot.player2_id == Some(user_id);
     let is_bot_game = !game_snapshot.is_pvp;
 
     let allowed = (game_snapshot.current_turn == 1 && is_p1)
@@ -174,35 +106,51 @@ async fn handle_move(
     }
 
     // ── Apply player's move ───────────────────────────────────────────────
-    let player_cell = if game_snapshot.current_turn == 1 { Cell::X } else { Cell::O };
+    let player_cell = if game_snapshot.current_turn == 1 {
+        Cell::X
+    } else {
+        Cell::O
+    };
     let board_after_player = game_snapshot.board.with_move(pos, player_cell);
     let player_result = board_after_player.result();
 
     // ── If bot game and still in progress, let bot move ───────────────────
-    let (final_board, bot_history_entry, game_result) = if is_bot_game
-        && player_result == GameResult::InProgress
-    {
-        let available = board_after_player.available_moves();
-        if available.is_empty() {
-            (board_after_player.clone(), None, board_after_player.result())
-        } else {
-            let q = QLearner::new();
-            let bot_state = board_after_player.to_state_key();
-            let bot_pos = q
-                .select_action(&data.db, &bot_state, &available, game_snapshot.bot_games_at_start)
-                .await;
+    let (final_board, bot_history_entry, game_result) =
+        if is_bot_game && player_result == GameResult::InProgress {
+            let available = board_after_player.available_moves();
+            if available.is_empty() {
+                (
+                    board_after_player.clone(),
+                    None,
+                    board_after_player.result(),
+                )
+            } else {
+                let q = QLearner::new();
+                let bot_state = board_after_player.to_state_key();
+                let bot_pos = q
+                    .select_action(
+                        &data.db,
+                        &bot_state,
+                        &available,
+                        game_snapshot.bot_games_at_start,
+                    )
+                    .await;
 
-            let board_after_bot = board_after_player.with_move(bot_pos, Cell::O);
-            let result = board_after_bot.result();
-            (board_after_bot, Some((bot_state, bot_pos)), result)
-        }
-    } else {
-        (board_after_player, None, player_result)
-    };
+                let board_after_bot = board_after_player.with_move(bot_pos, Cell::O);
+                let result = board_after_bot.result();
+                (board_after_bot, Some((bot_state, bot_pos)), result)
+            }
+        } else {
+            (board_after_player, None, player_result)
+        };
 
     // ── Work out next turn ────────────────────────────────────────────────
     let next_turn = if game_snapshot.is_pvp {
-        if game_snapshot.current_turn == 1 { 2 } else { 1 }
+        if game_snapshot.current_turn == 1 {
+            2
+        } else {
+            1
+        }
     } else {
         1
     };
@@ -294,22 +242,48 @@ async fn handle_accept(
             games_lib::get_user_points(&data.db, challenge.opponent_id, challenge.guild_id).await;
 
         if challenger_pts < challenge.wager {
-            delete_challenge(ctx, component, data, &game_id, &format!(
-                "<@{}> no longer has enough points to cover the wager. Challenge cancelled.",
-                challenge.challenger_id
-            )).await;
+            delete_challenge(
+                ctx,
+                component,
+                data,
+                &game_id,
+                &format!(
+                    "<@{}> no longer has enough points to cover the wager. Challenge cancelled.",
+                    challenge.challenger_id
+                ),
+            )
+            .await;
             return;
         }
         if opponent_pts < challenge.wager {
-            delete_challenge(ctx, component, data, &game_id, &format!(
-                "<@{}>, you don't have enough points to cover the wager of {} pts.",
-                challenge.opponent_id, challenge.wager
-            )).await;
+            delete_challenge(
+                ctx,
+                component,
+                data,
+                &game_id,
+                &format!(
+                    "<@{}>, you don't have enough points to cover the wager of {} pts.",
+                    challenge.opponent_id, challenge.wager
+                ),
+            )
+            .await;
             return;
         }
 
-        games_lib::deduct_points(&data.db, challenge.challenger_id, challenge.guild_id, challenge.wager).await;
-        games_lib::deduct_points(&data.db, challenge.opponent_id, challenge.guild_id, challenge.wager).await;
+        games_lib::deduct_points(
+            &data.db,
+            challenge.challenger_id,
+            challenge.guild_id,
+            challenge.wager,
+        )
+        .await;
+        games_lib::deduct_points(
+            &data.db,
+            challenge.opponent_id,
+            challenge.guild_id,
+            challenge.wager,
+        )
+        .await;
     }
 
     data.ttt_challenges.lock().await.remove(&game_id);
@@ -342,7 +316,7 @@ async fn handle_accept(
         )
         .await;
 
-    let message_id = component.message.id.into();
+    let message_id = component.message.id;
 
     let game = TttGame {
         game_id: new_game_id.clone(),
@@ -551,7 +525,13 @@ async fn handle_bet_modal_submit(
     {
         let mut games = data.ttt_games.lock().await;
         if let Some(game) = games.get_mut(&game_id) {
-            game.bets.insert(user_id, Bet { target: target.clone(), amount });
+            game.bets.insert(
+                user_id,
+                Bet {
+                    target: target.clone(),
+                    amount,
+                },
+            );
         }
     }
 
@@ -609,11 +589,13 @@ async fn finalize_game(
         .await;
 
         let final_reward = match result {
-            GameResult::Win(Cell::O) =>  1.0,
+            GameResult::Win(Cell::O) => 1.0,
             GameResult::Win(Cell::X) => -1.0,
-            _ =>  0.0,
+            _ => 0.0,
         };
-        QLearner::new().td_update(db, bot_history, final_reward).await;
+        QLearner::new()
+            .td_update(db, bot_history, final_reward)
+            .await;
 
         if p1_won {
             let bonus = points_for_beating_bot(game.bot_games_at_start);
@@ -650,8 +632,8 @@ async fn finalize_game(
             let bet_won = matches!(
                 (&bet.target, p1_won, p2_won, is_draw),
                 (BetTarget::Player1, true, _, _)
-                | (BetTarget::Player2, _, true, _)
-                | (BetTarget::Draw, _, _, true)
+                    | (BetTarget::Player2, _, true, _)
+                    | (BetTarget::Draw, _, _, true)
             );
             if bet_won {
                 games_lib::add_points(db, *bettor_id, game.guild_id, bet.amount * 2).await;
@@ -663,15 +645,13 @@ async fn finalize_game(
 // ── TTT-specific database helpers ─────────────────────────────────────────────
 
 async fn get_bot_total_games(db: &sqlx::SqlitePool) -> i64 {
-    sqlx::query(
-        "SELECT COALESCE(total_games, 0) AS total_games FROM ttt_bot_stats WHERE id = 1",
-    )
-    .fetch_optional(db)
-    .await
-    .ok()
-    .flatten()
-    .map(|row| row.get::<i64, _>("total_games"))
-    .unwrap_or(0)
+    sqlx::query("SELECT COALESCE(total_games, 0) AS total_games FROM ttt_bot_stats WHERE id = 1")
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .map(|row| row.get::<i64, _>("total_games"))
+        .unwrap_or(0)
 }
 
 async fn upsert_player_stats(
@@ -692,7 +672,7 @@ async fn upsert_player_stats(
     )
     .bind(user_id.get() as i64)
     .bind(guild_id.get() as i64)
-    .bind(if won  { 1i64 } else { 0 })
+    .bind(if won { 1i64 } else { 0 })
     .bind(if lost { 1i64 } else { 0 })
     .bind(if drew { 1i64 } else { 0 })
     .execute(db)

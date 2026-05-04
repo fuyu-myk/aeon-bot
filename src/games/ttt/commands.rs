@@ -4,18 +4,17 @@ use std::time::Instant;
 use poise::serenity_prelude as serenity;
 use sqlx::Row;
 
-use crate::events::GlobalTracker;
-use crate::games::lib::{get_user_points, generate_game_id};
-use crate::games::ttt::{ensure_user_row, game_status, get_bot_total_games, make_board_components, make_challenge_components};
-use super::{
-    PendingChallenge, TttGame,
-};
 use super::board::Board;
-
+use super::{PendingChallenge, TttGame};
+use crate::events::GlobalTracker;
+use crate::games::lib::{generate_game_id, get_user_points};
+use crate::games::ttt::{
+    ensure_user_row, game_status, get_bot_total_games, make_board_components,
+    make_challenge_components,
+};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Context<'a> = poise::Context<'a, GlobalTracker, Error>;
-
 
 /// Tic-Tac-Toe — play the bot, check stats, or challenge a friend
 #[poise::command(
@@ -41,7 +40,8 @@ pub async fn play(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => {
-            ctx.say("This command can only be used in a server!").await?;
+            ctx.say("This command can only be used in a server!")
+                .await?;
             return Ok(());
         }
     };
@@ -52,12 +52,12 @@ pub async fn play(ctx: Context<'_>) -> Result<(), Error> {
     {
         let games = ctx.data().ttt_games.lock().await;
         let already_playing = games.values().any(|g| {
-            g.guild_id == guild_id
-                && (g.player1_id == player_id || g.player2_id == Some(player_id))
+            g.guild_id == guild_id && (g.player1_id == player_id || g.player2_id == Some(player_id))
         });
 
         if already_playing {
-            ctx.say("You already have an active Tic-Tac-Toe game in this server! Finish it first.").await?;
+            ctx.say("You already have an active Tic-Tac-Toe game in this server! Finish it first.")
+                .await?;
             return Ok(());
         }
     }
@@ -69,12 +69,13 @@ pub async fn play(ctx: Context<'_>) -> Result<(), Error> {
     let status = game_status(&board, player_id, None, 1, bot_games, false, 0);
     let components = make_board_components(&board, &game_id, false);
 
-    let reply = ctx.send(
-        poise::CreateReply::default()
-            .content(status)
-            .components(components),
-    )
-    .await?;
+    let reply = ctx
+        .send(
+            poise::CreateReply::default()
+                .content(status)
+                .components(components),
+        )
+        .await?;
 
     let message = reply.message().await?;
 
@@ -104,11 +105,10 @@ pub async fn play(ctx: Context<'_>) -> Result<(), Error> {
 pub async fn ttt_stats(ctx: Context<'_>) -> Result<(), Error> {
     let db = &ctx.data().db;
 
-    let row = sqlx::query(
-        "SELECT total_games, wins, losses, draws FROM ttt_bot_stats WHERE id = 1",
-    )
-    .fetch_optional(db)
-    .await?;
+    let row =
+        sqlx::query("SELECT total_games, wins, losses, draws FROM ttt_bot_stats WHERE id = 1")
+            .fetch_optional(db)
+            .await?;
 
     let (total, wins, losses, draws) = match row {
         Some(r) => (
@@ -127,10 +127,10 @@ pub async fn ttt_stats(ctx: Context<'_>) -> Result<(), Error> {
     };
 
     let experience = match total {
-        0..=49    => "🐣 Novice",
-        50..=199  => "🔰 Apprentice",
+        0..=49 => "🐣 Novice",
+        50..=199 => "🔰 Apprentice",
         200..=499 => "⚔️ Veteran",
-        _         => "💀 Expert",
+        _ => "💀 Expert",
     };
 
     let epsilon = crate::games::ttt::qlearning::QLearner::epsilon(total);
@@ -147,8 +147,14 @@ pub async fn ttt_stats(ctx: Context<'_>) -> Result<(), Error> {
          🔰 50–199 games → +10 pts\n\
          ⚔️ 200–499 games → +15 pts\n\
          💀 500+ games → +25 pts",
-        experience, total, wins, losses, draws, win_rate,
-        epsilon, if epsilon < 0.2 { "bot" } else { "bot" },
+        experience,
+        total,
+        wins,
+        losses,
+        draws,
+        win_rate,
+        epsilon,
+        "bot",
         epsilon * 100.0
     ))
     .await?;
@@ -160,15 +166,15 @@ pub async fn ttt_stats(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command, prefix_command)]
 pub async fn challenge(
     ctx: Context<'_>,
-    #[description = "The user to challenge"]
-    opponent: serenity::User,
+    #[description = "The user to challenge"] opponent: serenity::User,
     #[description = "Points to wager (both players stake this amount, winner takes all)"]
     wager: Option<i64>,
 ) -> Result<(), Error> {
     let guild_id = match ctx.guild_id() {
         Some(id) => id,
         None => {
-            ctx.say("This command can only be used in a server!").await?;
+            ctx.say("This command can only be used in a server!")
+                .await?;
             return Ok(());
         }
     };
@@ -180,7 +186,8 @@ pub async fn challenge(
         return Ok(());
     }
     if opponent.bot {
-        ctx.say("You can't challenge a bot!\nUse `/ttt play` to play against aeon-bot.").await?;
+        ctx.say("You can't challenge a bot!\nUse `/ttt play` to play against aeon-bot.")
+            .await?;
         return Ok(());
     }
 
@@ -214,7 +221,8 @@ pub async fn challenge(
         });
 
         if busy {
-            ctx.say("One of the players already has an active game. Finish it first!").await?;
+            ctx.say("One of the players already has an active game. Finish it first!")
+                .await?;
             return Ok(());
         }
     }
@@ -232,12 +240,13 @@ pub async fn challenge(
         challenger_id, opponent.id, wager_text, opponent.id
     );
 
-    let reply = ctx.send(
-        poise::CreateReply::default()
-            .content(content)
-            .components(make_challenge_components(&game_id)),
-    )
-    .await?;
+    let reply = ctx
+        .send(
+            poise::CreateReply::default()
+                .content(content)
+                .components(make_challenge_components(&game_id)),
+        )
+        .await?;
 
     let message = reply.message().await?;
 

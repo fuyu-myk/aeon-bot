@@ -1,25 +1,26 @@
+use chrono::{DateTime, Utc};
+use poise::serenity_prelude as serenity;
 use serenity::async_trait;
 use serenity::client::{Context, EventHandler};
-use serenity::model::gateway::Ready;
-use serenity::model::voice::VoiceState;
-use serenity::model::id::{GuildId, ChannelId, UserId};
 use serenity::model::application::Interaction;
-use poise::serenity_prelude as serenity;
-use tokio::time::{interval, Duration};
-use tokio::sync::Mutex;
-use sqlx::{SqlitePool, Row};
-use chrono::{DateTime, Utc};
-use std::sync::Arc;
+use serenity::model::gateway::Ready;
+use serenity::model::id::{ChannelId, GuildId, UserId};
+use serenity::model::voice::VoiceState;
+use sqlx::{Row, SqlitePool};
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio::time::{Duration, interval};
 
-use crate::games::ttt::{TttGames, TttChallenges};
-
+use crate::games::bj::BjGames;
+use crate::games::ttt::{TttChallenges, TttGames};
 
 pub struct GlobalTracker {
     pub db: SqlitePool,
     pub active_sessions: Arc<Mutex<HashMap<(UserId, GuildId), VoiceSession>>>,
     pub ttt_games: TttGames,
     pub ttt_challenges: TttChallenges,
+    pub bj_games: BjGames,
 }
 
 #[allow(dead_code)]
@@ -53,8 +54,10 @@ impl GlobalTracker {
                 total_minutes INTEGER DEFAULT 0,
                 last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (user_id, guild_id)
-            )"
-        ).execute(&pool).await?;
+            )",
+        )
+        .execute(&pool)
+        .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS active_sessions (
@@ -63,8 +66,10 @@ impl GlobalTracker {
                 channel_id INTEGER,
                 join_time TIMESTAMP,
                 PRIMARY KEY (user_id, guild_id)
-            )"
-        ).execute(&pool).await?;
+            )",
+        )
+        .execute(&pool)
+        .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS session_history (
@@ -76,8 +81,10 @@ impl GlobalTracker {
                 leave_time TIMESTAMP,
                 duration_minutes INTEGER,
                 points_awarded INTEGER
-            )"
-        ).execute(&pool).await?;
+            )",
+        )
+        .execute(&pool)
+        .await?;
 
         // ── Tic-Tac-Toe tables ─────────────────────────────────────────────
 
@@ -89,8 +96,10 @@ impl GlobalTracker {
                 q_value     REAL    DEFAULT 0.0,
                 visit_count INTEGER DEFAULT 0,
                 PRIMARY KEY (state_key, action)
-            )"
-        ).execute(&pool).await?;
+            )",
+        )
+        .execute(&pool)
+        .await?;
 
         // Singleton row tracking the bot's aggregate record
         sqlx::query(
@@ -100,8 +109,10 @@ impl GlobalTracker {
                 wins        INTEGER DEFAULT 0,
                 losses      INTEGER DEFAULT 0,
                 draws       INTEGER DEFAULT 0
-            )"
-        ).execute(&pool).await?;
+            )",
+        )
+        .execute(&pool)
+        .await?;
 
         // Per-player tic-tac-toe statistics
         sqlx::query(
@@ -112,14 +123,36 @@ impl GlobalTracker {
                 losses   INTEGER DEFAULT 0,
                 draws    INTEGER DEFAULT 0,
                 PRIMARY KEY (user_id, guild_id)
-            )"
-        ).execute(&pool).await?;
+            )",
+        )
+        .execute(&pool)
+        .await?;
+
+        // ── Blackjack table ─────────────────────────────────────────────––
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS bj_player_stats (
+                user_id       INTEGER NOT NULL,
+                guild_id      INTEGER NOT NULL,
+                wins          INTEGER NOT NULL DEFAULT 0,
+                losses        INTEGER NOT NULL DEFAULT 0,
+                pushes        INTEGER NOT NULL DEFAULT 0,
+                surrenders    INTEGER NOT NULL DEFAULT 0,
+                blackjacks    INTEGER NOT NULL DEFAULT 0,
+                total_wagered INTEGER NOT NULL DEFAULT 0,
+                total_won     INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (user_id, guild_id)
+            )",
+        )
+        .execute(&pool)
+        .await?;
 
         Ok(Self {
             db: pool,
             active_sessions: Arc::new(Mutex::new(HashMap::new())),
             ttt_games: Arc::new(Mutex::new(HashMap::new())),
             ttt_challenges: Arc::new(Mutex::new(HashMap::new())),
+            bj_games: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -141,14 +174,15 @@ impl GlobalTracker {
         // Store in db
         if let Err(e) = sqlx::query(
             "INSERT OR REPLACE INTO active_sessions
-             (user_id, guild_id, channel_id, join_time) VALUES (?, ?, ?, ?)"
+             (user_id, guild_id, channel_id, join_time) VALUES (?, ?, ?, ?)",
         )
         .bind(user_id.get() as i64)
         .bind(guild_id.get() as i64)
         .bind(channel_id.get() as i64)
         .bind(session.join_time.timestamp())
         .execute(&self.db)
-        .await {
+        .await
+        {
             eprintln!("Database error on voice join: {}", e);
         }
     }
@@ -165,7 +199,9 @@ impl GlobalTracker {
             let duration_minutes = duration.num_minutes().max(0) as i32;
             let points_awarded = duration_minutes; // 1 point per minute
 
-            let username = user_id.to_user(&ctx.http).await
+            let username = user_id
+                .to_user(&ctx.http)
+                .await
                 .map(|u| u.name)
                 .unwrap_or_else(|_| "Unknown".to_string());
 
@@ -188,7 +224,7 @@ impl GlobalTracker {
                  total_minutes = total_minutes + ?,
                  username = ?,
                  last_updated = CURRENT_TIMESTAMP
-                 WHERE user_id = ? AND guild_id = ?"
+                 WHERE user_id = ? AND guild_id = ?",
             )
             .bind(points_awarded)
             .bind(duration_minutes)
@@ -196,7 +232,8 @@ impl GlobalTracker {
             .bind(user_id.get() as i64)
             .bind(guild_id.get() as i64)
             .execute(&self.db)
-            .await {
+            .await
+            {
                 eprintln!("Error updating user points: {}", e);
             }
 
@@ -219,13 +256,13 @@ impl GlobalTracker {
             }
 
             // Remove from active_sessions
-            if let Err(e) = sqlx::query(
-                "DELETE FROM active_sessions WHERE user_id = ? AND guild_id = ?"
-            )
-            .bind(user_id.get() as i64)
-            .bind(guild_id.get() as i64)
-            .execute(&self.db)
-            .await {
+            if let Err(e) =
+                sqlx::query("DELETE FROM active_sessions WHERE user_id = ? AND guild_id = ?")
+                    .bind(user_id.get() as i64)
+                    .bind(guild_id.get() as i64)
+                    .execute(&self.db)
+                    .await
+            {
                 eprintln!("Error removing active session: {}", e);
             }
         }
@@ -239,7 +276,9 @@ impl GlobalTracker {
         let sessions = active_sessions.lock().await;
 
         for ((user_id, guild_id), _session) in sessions.iter() {
-            let username = user_id.to_user(&ctx.http).await
+            let username = user_id
+                .to_user(&ctx.http)
+                .await
                 .map(|u| u.name)
                 .unwrap_or_else(|_| "Unknown".to_string());
 
@@ -259,7 +298,7 @@ impl GlobalTracker {
                  total_minutes = total_minutes + 1,
                  username = ?,
                  last_updated = CURRENT_TIMESTAMP
-                 WHERE user_id = ? AND guild_id = ?"
+                 WHERE user_id = ? AND guild_id = ?",
             )
             .bind(&username)
             .bind(user_id.get() as i64)
@@ -271,27 +310,32 @@ impl GlobalTracker {
         Ok(())
     }
 
-    pub async fn get_leaderboard(&self, guild_id: GuildId, limit: i32) -> Result<Vec<LeaderboardEntry>, sqlx::Error> {
+    pub async fn get_leaderboard(
+        &self,
+        guild_id: GuildId,
+        limit: i32,
+    ) -> Result<Vec<LeaderboardEntry>, sqlx::Error> {
         let rows = sqlx::query(
             "SELECT user_id, username, total_points, total_minutes
              FROM users
              WHERE guild_id = ? AND total_points > 0
              ORDER BY total_points DESC
-             LIMIT ?"
+             LIMIT ?",
         )
         .bind(guild_id.get() as i64)
         .bind(limit)
         .fetch_all(&self.db)
         .await?;
 
-        let entries = rows.into_iter().map(|row| {
-            LeaderboardEntry {
+        let entries = rows
+            .into_iter()
+            .map(|row| LeaderboardEntry {
                 user_id: row.get("user_id"),
                 username: row.get("username"),
                 total_points: row.get("total_points"),
                 total_minutes: row.get("total_minutes"),
-            }
-        }).collect();
+            })
+            .collect();
 
         Ok(entries)
     }
@@ -306,32 +350,37 @@ impl EventHandler for GlobalTracker {
         let db = self.db.clone();
         let active_sessions = Arc::clone(&self.active_sessions);
 
-        tokio::spawn(
-            async move {
-                let mut interval = interval(Duration::from_secs(60));
+        tokio::spawn(async move {
+            let mut interval = interval(Duration::from_secs(60));
+            interval.tick().await;
+
+            loop {
                 interval.tick().await;
 
-                loop {
-                    interval.tick().await;
-
-                    if let Err(e) = Self::award_points(&db, &active_sessions, &ctx).await {
-                        eprintln!("Error awarding points: {}", e);
-                    }
+                if let Err(e) = Self::award_points(&db, &active_sessions, &ctx).await {
+                    eprintln!("Error awarding points: {}", e);
                 }
             }
-        );
+        });
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         match &interaction {
             Interaction::Component(component) => {
                 if component.data.custom_id.starts_with("ttt_") {
-                    crate::games::ttt::interactions::handle_ttt_interaction(&ctx, component, self).await;
+                    crate::games::ttt::interactions::handle_ttt_interaction(&ctx, component, self)
+                        .await;
+                } else if component.data.custom_id.starts_with("bj_") {
+                    crate::games::bj::interactions::handle_bj_interaction(&ctx, component, self)
+                        .await;
                 }
             }
             Interaction::Modal(modal) => {
                 if modal.data.custom_id.starts_with("ttt_") {
                     crate::games::ttt::interactions::handle_ttt_modal(&ctx, modal, self).await;
+                } else if modal.data.custom_id.starts_with("bj_") {
+                    crate::games::bj::interactions::handle_lobby_join_modal(&ctx, modal, self)
+                        .await;
                 }
             }
             _ => {}
@@ -348,13 +397,15 @@ impl EventHandler for GlobalTracker {
         // Voice state changes
         match (old.as_ref().and_then(|vs| vs.channel_id), new.channel_id) {
             // User joined vc
-            (None, Some(channel_id)) | (Some(_), Some(channel_id)) if old.as_ref().map(|vs| vs.channel_id) != Some(Some(channel_id))=> {
+            (None, Some(channel_id)) | (Some(_), Some(channel_id))
+                if old.as_ref().map(|vs| vs.channel_id) != Some(Some(channel_id)) =>
+            {
                 self.handle_join_vc(user_id, guild_id, channel_id).await;
-            },
+            }
             // User left vc
             (Some(_), None) => {
                 self.handle_leave_vc(user_id, guild_id, ctx).await;
-            },
+            }
             // User switched vc
             (Some(old_channel), Some(new_channel)) if old_channel != new_channel => {
                 self.handle_leave_vc(user_id, guild_id, ctx).await;
